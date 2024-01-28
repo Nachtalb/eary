@@ -1,0 +1,30 @@
+[tool.poetry]
+name = "reaction-search"
+version = "0.1.0"
+description = ""
+authors = ["Nachtalb <na@nachtalb.io>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+flask = "^3.0.1"
+flask-socketio = "^5.3.6"
+flask-caching = "^2.1.0"
+wslpath-python = "^0.0.3"
+pycatbox = "^1.0.3"
+pillow = "^10.2.0"
+imagehash = "^4.3.1"
+python-dotenv = "^1.0.1"
+
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.12.1"
+ruff = "^0.1.14"
+ruff-lsp = "^0.0.49"
+mypy = "^1.8.0"
+isort = "^5.13.2"
+ipdb = "^0.13.13"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

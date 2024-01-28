@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>File Search</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.min.js"></script>
+    <script type="text/javascript">
+      $(document).ready(function () {
+        var socket = io();
+        var currentQuery = "";
+        var currentTags = [];
+
+        function search(query, tags) {
+          if (query === undefined) {
+            currentQuery = $("#search_input").val();
+            query = currentQuery;
+          }
+          if (tags === undefined) {
+            currentTags = $(".tag-checkbox:checked")
+              .map(function () {
+                return $(this).val();
+              })
+              .get();
+            tags = currentTags;
+          }
+          socket.emit("search", { query: query, tags: tags });
+          updateURL(query, tags);
+        }
+
+        function delete_file(file) {
+          if (!confirm("Are you sure you want to delete this file?")) {
+            return;
+          }
+
+          socket.emit("delete", {
+            file: file,
+            searchQuery: { query: currentQuery, tags: currentTags },
+          });
+        }
+
+        function open_file(file) {
+          socket.emit("open", { file: file });
+        }
+
+        function catbox(file) {
+          socket.emit("catbox", { file: file });
+        }
+
+        function displayTags(tags) {
+          if ($("#tag-container").length) {
+            $("#tag-container").remove();
+          }
+          const tagContainer = $("<div id='tag-container'>");
+          tags.forEach(function (tag) {
+            const tagCount = $("<span class='tag-count'>").text(` (${tag[1]})`);
+            const tagLabel = $("<label>").text(tag[0]).attr("for", tag[0]);
+            tagLabel.append(tagCount);
+
+            const tagCheckbox = $("<input type='checkbox' class='tag-checkbox'>").val(tag[0]).attr("id", tag[0]);
+            if (currentTags.includes(tag[0])) {
+              tagCheckbox.prop("checked", true);
+            }
+            tagCheckbox.on("change", () => {
+              search();
+            });
+            tagContainer.append(tagCheckbox);
+            tagContainer.append(tagLabel);
+          });
+          $("#search_input").after(tagContainer);
+        }
+
+        $("#search_input").on("keyup", () => {
+          // if keypress is of non control char as ctrl, shift, alt etc.
+          // backspace is allowed, so is delete
+          if ((event.which > 31 && event.which < 127) || event.which === 8 || event.which === 46) {
+            search();
+          }
+        });
+
+        socket.on("catbox_success", function (url) {
+          copyToClipboard(url);
+          showToast("Copied to clipboard: " + url, "success");
+        });
+
+        socket.on("results", function (data) {
+          $("#results").empty();
+          displayTags(data.tags);
+
+          $("#total").text(data.files.length);
+
+          data.files.forEach(function (data) {
+            var container = $(`<li>
+              <div class='file-container'>
+                <div class="media-container">
+                  <span class="media-action delete">X</span>
+                  <span class="media-action open">O</span>
+                  <span class="media-action copy">C</span>
+                  <span class="media-action upload">U</span>
+                </div>
+                <form>
+                  <input type="text" class="filename-input" value="${data.name}">
+                  <button class="rename-button" type="submit">Rename</button>
+                </form>
+              </div>
+            </li>`);
+
+            container.find(".delete").on("click", function () {
+              delete_file(data.path);
+            });
+
+            container.find(".open").on("click", function () {
+              open_file(data.path);
+            });
+            container.find(".upload").on("click", function () {
+              catbox(data.path);
+            });
+            container.find(".copy").on("click", function () {
+              var text = data.full_path !== undefined ? data.full_path : data.url;
+              copyToClipboard(text);
+              showToast("Copied to clipboard: " + text, "success");
+            });
+
+            form = container.find("form");
+
+            form.on("submit", function (event) {
+              event.preventDefault();
+              event.stopPropagation();
+
+              socket.emit("rename", {
+                old: data.path,
+                new: $(this).find(".filename-input").val(),
+                searchQuery: { query: currentQuery, tags: currentTags },
+              });
+            });
+
+            var element;
+            if (data.type === "video") {
+              element = $("<video class='media' controls>").attr("src", data.url).attr("title", data.name);
+            } else {
+              element = $("<img class='media'>").attr("src", data.url).attr("title", data.name);
+            }
+
+            element.on("click", function () {
+              catbox(data.path);
+            });
+
+            container.find(".media-container").append(element);
+            $("#results").append(container);
+          });
+          autofocus(currentQuery);
+        });
+
+        socket.on("rename_success", function () {
+          // search();
+        });
+
+        socket.on("tags", function (tags) {
+          displayTags(tags);
+        });
+
+        socket.on("error", function (message) {
+          showToast(message, "error");
+        });
+        socket.on("success", function (message) {
+          showToast(message, "success");
+        });
+
+        var urlParams = new URLSearchParams(window.location.search);
+        currentQuery = urlParams.get("query") || "";
+        currentTags = urlParams.get("tags") ? urlParams.get("tags").split(",") : [];
+        search(currentQuery, currentTags);
+      });
+
+      function updateURL(query, tags) {
+        if (history.pushState) {
+          var newurl =
+            window.location.protocol +
+            "//" +
+            window.location.host +
+            window.location.pathname +
+            "?query=" +
+            encodeURIComponent(query) +
+            (tags ? "&tags=" + encodeURIComponent(tags) : "");
+          window.history.pushState({ path: newurl }, "", newurl);
+        }
+      }
+
+      function showToast(message, type, duration) {
+        var toast = $(`<div class="toast type-${type}">` + message + "</div>");
+        $("body").append(toast);
+        toast
+          .fadeIn(400)
+          .delay(duration || 3000)
+          .fadeOut(400, function () {
+            $(this).remove();
+          });
+      }
+
+      function autofocus(query) {
+        if (query === "!") {
+          document.querySelectorAll(".filename-input")[1].focus();
+        } else {
+          document.getElementById("search_input").focus();
+        }
+      }
+
+      function copyToClipboard(text) {
+        if (navigator.clipboard) {
+          return navigator.clipboard.writeText(text);
+        }
+      }
+    </script>
+
+    <style>
+      body {
+        font-family: sans-serif;
+      }
+
+      .toast {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background-color: rgba(0, 0, 0, 0.75);
+        color: white;
+        padding: 10px 20px;
+        border-radius: 5px;
+        display: none;
+        z-index: 1000;
+      }
+
+      .toast.type-success {
+        background-color: #4caf50bf;
+      }
+
+      .toast.type-error {
+        background-color: #f44336bf;
+      }
+
+      #search_input {
+        width: 100%;
+        height: 50px;
+        font-size: 20px;
+        padding: 10px;
+        box-sizing: border-box;
+      }
+      #results {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-wrap: wrap;
+      }
+
+      li {
+        width: calc(50vw - 40px);
+      }
+
+      @media screen and (min-width: 1000px) {
+        li {
+          width: calc(25vw - 40px);
+        }
+      }
+
+      @media screen and (min-width: 1500px) {
+        li {
+          width: calc(20vw - 40px);
+        }
+      }
+
+      @media screen and (min-width: 2000px) {
+        li {
+          width: calc(17.1vw - 40px);
+        }
+      }
+
+      li {
+        height: calc(33vh - 40px);
+        margin: 10px;
+        display: block;
+      }
+
+      .file-container {
+        display: flex;
+        flex-direction: column;
+        max-height: inherit;
+        justify-content: space-between;
+        height: 100%;
+      }
+
+      .media-container {
+        display: flex;
+        flex-grow: 1;
+        max-height: calc(33vh - 4em - 30px);
+        position: relative;
+      }
+
+      .media-action {
+        position: absolute;
+        top: 0;
+        right: 0;
+        background: #00000080;
+        color: white;
+        padding: 5px;
+        cursor: pointer;
+        user-select: none;
+        border-radius: 0 0 0 5px;
+        transition: all 0.3s;
+        text-align: center;
+        box-sizing: border-box;
+        padding: 0.5em;
+        width: 2em;
+        height: 2em;
+        display: inline-block;
+      }
+
+      .media-container .delete {
+        background: #f4433680;
+      }
+      .media-container .delete:hover {
+        background: #f44336;
+      }
+
+      .media-container .upload {
+        background: #4caf5080;
+        left: 2em;
+        right: auto;
+        border-radius: 0;
+      }
+      .media-container .upload:hover {
+        background: #4caf50;
+      }
+
+      .media-container .copy {
+        background: #673ab780;
+        left: 4em;
+        right: auto;
+        border-radius: 0 0 5px 0;
+      }
+      .media-container .copy:hover {
+        background: #673ab7;
+      }
+
+      .media-container .open {
+        left: 0;
+        right: auto;
+        border-radius: 0;
+        background: #2196f380;
+      }
+      .media-container .open:hover {
+        background: #2196f3;
+      }
+
+      .file-container .media {
+        object-fit: contain;
+        max-height: 100%;
+        margin: auto;
+        width: 100%;
+      }
+
+      form {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        margin-top: 5px;
+      }
+
+      .filename {
+        background: rgba(0, 0, 0, 0.5);
+        color: white;
+        width: 100%;
+        height: 1em;
+        text-align: center;
+        margin: 0;
+      }
+
+      button.rename-button {
+        background: #e0e0e0;
+        color: #333;
+        border-radius: 7px;
+        padding: 5px 10px;
+        border: none;
+        margin-top: 5px;
+        transition: all 0.3s;
+        cursor: pointer;
+      }
+
+      button.rename-button:hover,
+      button.rename-button:focus,
+      button.rename-button:active {
+        background: #a0a0ff;
+        color: #fff;
+      }
+
+      #tag-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 10px;
+        overflow-x: auto;
+        max-height: 150px;
+        background-color: #f7f7f7;
+        border-radius: 5px;
+        margin-bottom: 20px;
+      }
+
+      #tag-container label {
+        background: #e0e0e0;
+        color: #333;
+        border-radius: 15px;
+        padding: 5px 10px;
+        display: inline-flex;
+        align-items: center;
+        cursor: pointer;
+        user-select: none;
+        transition: all 0.3s;
+      }
+
+      #tag-container label:hover,
+      #tag-container .tag-checkbox:checked + label {
+        background: #a0a0ff;
+        color: #fff;
+      }
+
+      .tag-count {
+        margin-left: 4px;
+        font-size: 0.9em;
+        color: #666;
+      }
+
+      .tag-checkbox {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <input type="text" id="search_input" placeholder="Start typing..." autofocus value="{{ query }}" />
+    <div id="total">0</div>
+    <ul id="results"></ul>
+  </body>
+</html>
