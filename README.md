@@ -1,5 +1,7 @@
 # eary
 
+to be replaced with [aer](https://github.com/Nachtalb/aer)
+
 ## Run
 
 ```sh
